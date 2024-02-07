@@ -1,12 +1,13 @@
 import cv2
 import os
 import subprocess
+import numpy as np
 
 # Adjustable parameters
-HIGHLIGHT_DURATION = 10  # seconds
+HIGHLIGHT_DURATION = 20  # seconds
 COOLDOWN_PERIOD = 10  # seconds
-DARKNESS_THRESHOLD = 50  # Adjust based on your criteria for "black" frame
-FRAME_SAMPLE_RATE = 24  # Assume 24 fps, sample every second
+DARKNESS_THRESHOLD = 10  # Adjust based on your criteria for "black" frame
+FRAME_SAMPLE_RATE = 120  # Assume 24 fps, sample every 2 seconds
 
 # Path configurations
 INPUT_FOLDER = 'input'
@@ -51,6 +52,7 @@ def detect_black_frames(video_file, start_global_time):
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     timestamps = []
+    index = 0
 
     for frame_idx in range(0, frame_count, FRAME_SAMPLE_RATE):
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
@@ -60,6 +62,11 @@ def detect_black_frames(video_file, start_global_time):
 
         # Calculate the frame's average brightness
         average_brightness = frame.mean()
+        
+        index += 2
+        
+        if index % 60 == 0:
+            print(f"Processed {index} seconds...")
         if average_brightness < DARKNESS_THRESHOLD:
             # Calculate global timestamp for the black frame
             global_timestamp = start_global_time + (frame_idx / fps)
@@ -71,7 +78,7 @@ def detect_black_frames(video_file, start_global_time):
 # Function to map video segments and detect highlights
 def map_and_detect_highlights(video_segments):
     highlights = []
-    last_processed_time = 0
+    last_processed_time = None
 
     for segment in video_segments:
         filename = segment['filename']
@@ -80,7 +87,7 @@ def map_and_detect_highlights(video_segments):
 
         for timestamp in black_frame_timestamps:
             # Apply cooldown period
-            if timestamp - last_processed_time > COOLDOWN_PERIOD:
+            if last_processed_time is None or timestamp - last_processed_time > COOLDOWN_PERIOD:
                 highlight_start = max(timestamp - HIGHLIGHT_DURATION, 0)
                 highlights.append((highlight_start, timestamp))
                 last_processed_time = timestamp
@@ -138,7 +145,8 @@ def generate_ffmpeg_commands(highlight_instructions):
                 filter_complex += f"[{j}:v:0][{j}:a:0]"
             filter_complex += f"concat=n={len(instructions)}:v=1:a=1 [v] [a]"
 
-            concat_command = f"ffmpeg {inputs}-filter_complex \"{filter_complex}\" -map \"[v]\" -map \"[a]\" \"{OUTPUT_FOLDER}\\highlight_{i}.mp4\""
+            concat_command = f"ffmpeg {inputs} -filter_complex \"{filter_complex}\" -map \"[v]\" -map \"[a]\" -r 60 -c:v libx264 -crf 22 -vsync cfr \"{OUTPUT_FOLDER}/highlight_{i}.mp4\""
+
             commands.append(concat_command)
 
             # Cleanup temporary files command for Windows
